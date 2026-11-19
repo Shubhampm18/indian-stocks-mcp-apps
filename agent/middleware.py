@@ -17,8 +17,11 @@ Three AgentMiddleware subclasses plugged into ``create_agent``:
                        equality, sign-insensitive: payloads store drawdowns
                        unsigned while prose adds the sign). One repair call;
                        if it still fails, the answer is prefixed
-                       "(unverified: N figures)". Skipped when no server tool
-                       ran this turn.
+                       "(unverified: N figures)". Turns where memory tools ran
+                       are skipped (memory is context, never authority); a
+                       turn with NO tool call that still quotes figures is
+                       flagged outright — nothing backs them and there is no
+                       tool output to repair from.
 
 Mixed-turn policy (chosen: STRICT). A turn that calls server tools AND
 memory tools is checked against server payloads only — memory payloads never
@@ -260,13 +263,29 @@ class GroundingGuard(AgentMiddleware):
         """Shared analysis for the sync and async paths.
 
         Sets ``last_result`` and returns None when no repair is needed
-        (skipped turn / already grounded); otherwise returns the repair plan.
+        (skipped turn / already grounded); otherwise returns the repair plan,
+        or — for a figure quoted with no tool call at all — a direct
+        ``replacement`` (nothing exists to repair against).
         """
         turn_msgs = self._this_turn_messages(messages)
         texts = self._server_tool_texts(turn_msgs)
         if not texts:
-            self.last_result = {"grounded": None, "claims": []}
-            return None  # memory-only / pure-conversation turn: not guarded
+            if any(isinstance(m, ToolMessage) for m in turn_msgs):
+                self.last_result = {"grounded": None, "claims": []}
+                return None  # memory-only turn: memory is context, never authority
+            draft = _message_text(last.content)
+            claims = extract_claims(draft)
+            if not claims:
+                self.last_result = {"grounded": None, "claims": []}
+                return None  # pure conversation, nothing quoted to verify
+            # No tool ran this turn, yet figures were quoted: nothing backs
+            # them, and without tool output there is nothing to repair FROM.
+            self.last_result = {"grounded": False, "claims": claims,
+                                "unmatched": claims, "action": "flagged"}
+            return {"last_id": last.id, "numbers": [], "repair_input": None,
+                    "replacement":
+                        f"(unverified: {len(claims)} figures) "
+                        f"{draft}".strip()}
         draft = _message_text(last.content)
         claims = extract_claims(draft)
         numbers = self._tool_numbers(texts)
@@ -311,6 +330,9 @@ class GroundingGuard(AgentMiddleware):
         plan = self._analyze(messages, last)
         if plan is None:
             return None
+        if plan.get("replacement") is not None:  # flagged without repair
+            return {"messages": [RemoveMessage(id=plan["last_id"]),
+                                 AIMessage(content=plan["replacement"])]}
         repaired = self.model.invoke([HumanMessage(content=plan["repair_input"])])
         repaired_text = _message_text(repaired.content) if isinstance(repaired, AIMessage) \
             else str(repaired)
@@ -327,6 +349,9 @@ class GroundingGuard(AgentMiddleware):
         plan = self._analyze(messages, last)
         if plan is None:
             return None
+        if plan.get("replacement") is not None:  # flagged without repair
+            return {"messages": [RemoveMessage(id=plan["last_id"]),
+                                 AIMessage(content=plan["replacement"])]}
         repaired = await self.model.ainvoke([HumanMessage(content=plan["repair_input"])])
         repaired_text = _message_text(repaired.content) if isinstance(repaired, AIMessage) \
             else str(repaired)
