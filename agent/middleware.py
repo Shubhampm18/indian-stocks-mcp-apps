@@ -10,12 +10,28 @@ Three AgentMiddleware subclasses plugged into ``create_agent``:
                        get_risk_metrics.benchmark from the user's saved
                        preferences when the model omits them, and says so in
                        the tool result ("default applied: ...").
-  GroundingGuard       after_model — every quoted figure (decimal point,
-                       thousands separator, currency symbol or %) must appear
-                       in this turn's server-tool output (0.5% relative or
-                       2-decimal equality). One repair call; if it still
-                       fails, the answer is prefixed "(unverified: N figures)".
-                       Skipped when no server tool ran this turn.
+  GroundingGuard       after_model / aafter_model — every quoted figure
+                       (decimal point, thousands separator, currency symbol,
+                       % or a "6x"-style multiple) must appear in this turn's
+                       server-tool output (0.5% relative or 2-decimal
+                       equality, sign-insensitive: payloads store drawdowns
+                       unsigned while prose adds the sign). One repair call;
+                       if it still fails, the answer is prefixed
+                       "(unverified: N figures)". Skipped when no server tool
+                       ran this turn.
+
+Mixed-turn policy (chosen: STRICT). A turn that calls server tools AND
+memory tools is checked against server payloads only — memory payloads never
+validate a claim. Memory is context, never authority: a legitimate figure
+that only exists in a memory payload costs one repair call, which is the
+acceptable price for never passing off recalled context as fresh tool data.
+(The permissive alternative — stamping memory-sourced claims source="memory"
+— was rejected because it lets the model dress context up as data.)
+
+Matching is unit-blind: "1570.40x" matches a payload 1570.4 numerically, and
+"1.57 lakh" matches only a payload that itself writes "1.57 lakh" (string
+scan), not one holding 157000.0. Scaling and unit normalisation are out of
+scope; the flagged-figures prefix keeps such answers honest.
 """
 
 from __future__ import annotations
@@ -36,34 +52,36 @@ SERVER_TOOL_NAMES = frozenset({
     "get_peer_comparison",
 })
 
-# Numbers carrying a marker: thousands separator, decimal point, and an
-# optional currency prefix / percent suffix. Bare integers match via the
-# last alternative but are dropped by the marker filter below.
+# Numbers carrying a marker: thousands separator, decimal point, currency
+# prefix, percent suffix or a "6x"-style multiple suffix. Bare integers match
+# via the last alternative but are dropped by the marker filter below.
 _CLAIM_RE = re.compile(
     r"(?:(?P<cur>Rs\.?|INR|₹|[$€£])\s*)?"
     r"(?P<num>-?\d{1,3}(?:,\d{3})+(?:\.\d+)?|-?\d+\.\d+|-?\d+)"
-    r"(?P<pct>%)?"
+    r"(?P<pct>%)?(?P<mult>[xX])?"
 )
 
 
 def extract_claims(text: str) -> list[dict[str, Any]]:
     """Figures the model quoted that need grounding.
 
-    A claim carries a decimal point, a thousands separator, a currency symbol
-    or a percent sign. Years 1900-2100 (bare, undecorated) and bare integers
-    0-9 are ignored.
+    A claim carries a decimal point, a thousands separator, a currency symbol,
+    a percent sign or a multiple suffix ("6x"). Years 1900-2100 (bare,
+    undecorated) and bare integers 0-9 are ignored. Matching is unit-blind
+    (see module docstring).
     """
     claims: list[dict[str, Any]] = []
     for match in _CLAIM_RE.finditer(text):
         token = match.group("num")
         cur = match.group("cur")
         pct = match.group("pct")
-        marked = bool(cur or pct or "." in token or "," in token)
+        mult = match.group("mult")
+        marked = bool(cur or pct or mult or "." in token or "," in token)
         if not marked:
             continue
         value = float(token.replace(",", ""))
         # A year: undecorated whole number 1900-2100.
-        if not cur and not pct and value.is_integer() and 1900 <= value <= 2100:
+        if not cur and not pct and not mult and value.is_integer() and 1900 <= value <= 2100:
             continue
         claims.append({"token": match.group(0).strip(), "value": value})
     return claims
@@ -111,10 +129,15 @@ def _parse_json(content: str) -> Any | None:
 
 
 def _matches(value: float, numbers: list[float]) -> bool:
+    """2-decimal equality, 0.5% relative tolerance, or the same magnitude
+    with flipped sign (payloads store drawdowns unsigned while prose adds
+    the sign: "fell -19.8%" grounds against drawdown 19.8)."""
     for candidate in numbers:
         if round(value, 2) == round(candidate, 2):
             return True
         if candidate != 0 and abs(value - candidate) / abs(candidate) <= 0.005:
+            return True
+        if round(abs(value), 2) == round(abs(candidate), 2):
             return True
     return False
 
@@ -249,7 +272,8 @@ class GroundingGuard(AgentMiddleware):
         numbers = self._tool_numbers(texts)
         unmatched = [c for c in claims if not _matches(c["value"], numbers)]
         if not unmatched:
-            self.last_result = {"grounded": True, "claims": claims}
+            self.last_result = {"grounded": True, "claims": claims,
+                                "action": "pass"}
             return None
         # ONE repair call.
         listing = ", ".join(c["token"] for c in unmatched)
@@ -269,11 +293,11 @@ class GroundingGuard(AgentMiddleware):
         unmatched2 = [c for c in claims2 if not _matches(c["value"], plan["numbers"])]
         if not unmatched2:
             self.last_result = {"grounded": True, "claims": claims2,
-                                "repaired": True}
+                                "repaired": True, "action": "repaired"}
             replacement = repaired_text
         else:
             self.last_result = {"grounded": False, "claims": claims2,
-                                "unmatched": unmatched2}
+                                "unmatched": unmatched2, "action": "flagged"}
             replacement = f"(unverified: {len(unmatched2)} figures) {repaired_text}".strip()
         return {"messages": [RemoveMessage(id=plan["last_id"]),
                              AIMessage(content=replacement)]}

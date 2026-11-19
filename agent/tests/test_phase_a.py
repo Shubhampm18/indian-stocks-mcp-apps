@@ -155,7 +155,8 @@ def test_sync_and_async_guard_paths_share_logic(tmp_path):
     async_result = async_guard.last_result
 
     assert sync_result == async_result == {"grounded": True, "claims": [
-        {"token": "Rs 1,570.40", "value": 1570.4}], "repaired": True}
+        {"token": "Rs 1,570.40", "value": 1570.4}], "repaired": True,
+        "action": "repaired"}
     assert [m.content for m in update["messages"]] == \
         [m.content for m in update2["messages"]]
 

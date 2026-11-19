@@ -213,13 +213,14 @@ class Agent:
         data_through = self._data_through(new_msgs, answer)
         guard = getattr(self, "_guard", None)
         grounded = guard.last_result["grounded"] if guard and guard.last_result else None
+        guard_action = guard.last_result.get("action") if guard and guard.last_result else None
         key_numbers = None
         if guard and guard.last_result:
             claims = guard.last_result.get("claims") or []
             key_numbers = json.dumps([c["token"] for c in claims],
                                      ensure_ascii=False) if claims else None
         self._log(question, tools_called, answer, as_of_used, data_through,
-                  key_numbers, grounded)
+                  key_numbers, grounded, guard_action)
         return answer
 
     def _data_through(self, new_msgs: list[BaseMessage], answer: str) -> str | None:
@@ -253,15 +254,17 @@ class Agent:
         return str(payloads[0]["data_through"])
 
     def _log(self, question, tools_called, answer, as_of_used, data_through,
-             key_numbers, grounded) -> None:
+             key_numbers, grounded, guard_action=None):
         if self.db_path is not None:
             mem.log_query(question, tools_called, answer[:500], self.db_path,
                           as_of_used=as_of_used, data_through=data_through,
-                          key_numbers=key_numbers, grounded=grounded)
+                          key_numbers=key_numbers, grounded=grounded,
+                          guard_action=guard_action)
         else:
             mem.log_query(question, tools_called, answer[:500],
                           as_of_used=as_of_used, data_through=data_through,
-                          key_numbers=key_numbers, grounded=grounded)
+                          key_numbers=key_numbers, grounded=grounded,
+                          guard_action=guard_action)
 
 
 __all__ = ["Agent", "STATIC_PROMPT", "make_client"]

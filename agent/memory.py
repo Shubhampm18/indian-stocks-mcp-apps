@@ -80,7 +80,8 @@ CREATE TABLE IF NOT EXISTS history (
     as_of_used     TEXT,
     data_through   TEXT,
     key_numbers    TEXT,
-    grounded       INTEGER
+    grounded       INTEGER,
+    guard_action   TEXT
 );
 CREATE TABLE IF NOT EXISTS preferences (
     key   TEXT PRIMARY KEY,
@@ -95,6 +96,7 @@ _HISTORY_MIGRATION_COLUMNS = (
     ("data_through", "TEXT"),
     ("key_numbers", "TEXT"),
     ("grounded", "INTEGER"),
+    ("guard_action", "TEXT"),
 )
 
 
@@ -168,16 +170,19 @@ def log_query(
     data_through: str | None = None,
     key_numbers: str | None = None,
     grounded: bool | None = None,
+    guard_action: str | None = None,
 ) -> int:
     """Log one agent turn. The first four positional parameters are the
-    original signature; the grounding columns are optional keywords."""
+    original signature; the grounding columns are optional keywords.
+    ``guard_action`` is one of 'pass' | 'repaired' | 'flagged' (NULL when the
+    guard did not apply to the turn)."""
     with _write_lock, _connect(db_path) as conn:
         cur = conn.execute(
             "INSERT INTO history(ts, question, tools_called, answer_summary,"
-            " as_of_used, data_through, key_numbers, grounded)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            " as_of_used, data_through, key_numbers, grounded, guard_action)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (_now(), question, json.dumps(list(tools_called)), answer_summary,
-             as_of_used, data_through, key_numbers, grounded),
+             as_of_used, data_through, key_numbers, grounded, guard_action),
         )
         conn.commit()
         return int(cur.lastrowid)
@@ -194,14 +199,14 @@ def recent_queries(limit: int = 10, db_path: str | Path = DB_PATH,
         if query:
             rows = conn.execute(
                 "SELECT id, ts, question, tools_called, answer_summary,"
-                " as_of_used, data_through, key_numbers, grounded"
+                " as_of_used, data_through, key_numbers, grounded, guard_action"
                 " FROM history WHERE question LIKE ? ORDER BY id DESC LIMIT ?",
                 (f"%{query}%", int(limit)),
             ).fetchall()
         else:
             rows = conn.execute(
                 "SELECT id, ts, question, tools_called, answer_summary,"
-                " as_of_used, data_through, key_numbers, grounded"
+                " as_of_used, data_through, key_numbers, grounded, guard_action"
                 " FROM history ORDER BY id DESC LIMIT ?",
                 (int(limit),),
             ).fetchall()
