@@ -1,0 +1,17 @@
+[project]
+name = "indian-stocks-dashboard"
+version = "0.3.0"
+description = "Streamlit dashboard for indian-stocks-mcp (NSE/BSE, as_of point-in-time)"
+requires-python = ">=3.12"
+license = { file = "../LICENSE" }
+dependencies = [
+    "streamlit",
+    "pandas",
+    "numpy",
+    "plotly",
+    "pyarrow",
+    "indian-stocks-mcp>=0.3",
+]
+
+[tool.uv]
+package = false

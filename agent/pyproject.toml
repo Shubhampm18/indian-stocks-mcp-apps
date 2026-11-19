@@ -1,0 +1,24 @@
+[project]
+name = "indian-stocks-agent"
+version = "0.3.0"
+description = "LLM tool-calling agent over indian-stocks-mcp, with durable SQLite memory"
+requires-python = ">=3.12"
+license = { file = "../LICENSE" }
+dependencies = [
+    "mcp==1.12.4",
+    "pydantic==2.11.7",
+    "anyio>=4",
+    "openai>=1.0",
+]
+
+[dependency-groups]
+# The server is installed here for two reasons: the normaliser parity test
+# imports stock_analyst_mcp, and client.py prefers spawning the server from
+# the same environment (sys.executable -m stock_analyst_mcp.server).
+dev = ["pytest>=8", "indian-stocks-mcp"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

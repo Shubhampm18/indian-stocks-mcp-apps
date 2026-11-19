@@ -1,0 +1,35 @@
+name: ci
+on:
+  push:
+  pull_request:
+
+jobs:
+  agent:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - run: uv sync --all-packages
+      - run: cd agent && uv run python -m pytest -q
+      - run: cd agent && uv run python tests/smoke_agent.py
+      - run: cd agent && uv run python client.py --demo
+
+  dashboard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - run: uv sync --all-packages
+      - name: dashboard boots and answers health
+        run: |
+          cd dashboard
+          uv run streamlit run app.py --server.headless true --server.port 8894 &
+          for i in $(seq 1 30); do
+            sleep 2
+            if curl -fsS localhost:8894/_stcore/health; then exit 0; fi
+          done
+          echo "dashboard did not become healthy" && exit 1

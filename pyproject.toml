@@ -1,0 +1,16 @@
+[project]
+name = "indian-stocks-mcp-apps"
+version = "0.3.0"
+description = "Agentic client and Streamlit dashboard for indian-stocks-mcp (NSE/BSE, point-in-time as_of)"
+requires-python = ">=3.12"
+license = { file = "LICENSE" }
+
+[tool.uv.workspace]
+members = ["agent", "dashboard"]
+
+[tool.uv.sources]
+# The server is a separate repo/distribution. Until it is on PyPI, pin the tag.
+indian-stocks-mcp = { git = "https://github.com/Shubhampm18/indian-stocks-mcp", tag = "v0.3.0" }
+
+[tool.uv]
+package = false
