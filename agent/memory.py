@@ -15,11 +15,16 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
 DB_PATH = Path(__file__).with_name("memory.db")
+
+# Writes are serialised process-wide: the LangGraph tool node may run tool
+# calls in parallel threads, and SQLite connections are per-call.
+_write_lock = threading.Lock()
 
 # --- symbol normalisation (dependency-free by design) -----------------------
 #
@@ -71,7 +76,12 @@ CREATE TABLE IF NOT EXISTS history (
     ts             TEXT NOT NULL,
     question       TEXT NOT NULL,
     tools_called   TEXT NOT NULL DEFAULT '[]',
-    answer_summary TEXT NOT NULL DEFAULT ''
+    answer_summary TEXT NOT NULL DEFAULT '',
+    as_of_used     TEXT,
+    data_through   TEXT,
+    key_numbers    TEXT,
+    grounded       INTEGER,
+    guard_action   TEXT
 );
 CREATE TABLE IF NOT EXISTS preferences (
     key   TEXT PRIMARY KEY,
@@ -79,11 +89,31 @@ CREATE TABLE IF NOT EXISTS preferences (
 );
 """
 
+# Columns added after the first release; old DBs are migrated on connect so
+# they keep opening (PRAGMA table_info guards the ALTER).
+_HISTORY_MIGRATION_COLUMNS = (
+    ("as_of_used", "TEXT"),
+    ("data_through", "TEXT"),
+    ("key_numbers", "TEXT"),
+    ("grounded", "INTEGER"),
+    ("guard_action", "TEXT"),
+)
+
+
+def _migrate_history(conn: sqlite3.Connection) -> None:
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(history)")}
+    for col, ddl in _HISTORY_MIGRATION_COLUMNS:
+        if col not in existing:
+            conn.execute(f"ALTER TABLE history ADD COLUMN {col} {ddl}")
+
 
 def _connect(db_path: str | Path = DB_PATH) -> sqlite3.Connection:
-    conn = sqlite3.connect(str(db_path))
+    conn = sqlite3.connect(str(db_path), timeout=30)
     conn.row_factory = sqlite3.Row
+    # WAL lets concurrent readers proceed during a write (parallel tool calls).
+    conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(SCHEMA)
+    _migrate_history(conn)
     conn.commit()
     return conn
 
@@ -98,7 +128,7 @@ def add_to_watchlist(symbol: str, db_path: str | Path = DB_PATH) -> list[str]:
     sym = _normaliser(symbol)
     if not sym:
         raise ValueError("symbol must not be empty")
-    with _connect(db_path) as conn:
+    with _write_lock, _connect(db_path) as conn:
         conn.execute(
             "INSERT OR IGNORE INTO watchlist(symbol, added_at) VALUES (?, ?)",
             (sym, _now()),
@@ -108,7 +138,7 @@ def add_to_watchlist(symbol: str, db_path: str | Path = DB_PATH) -> list[str]:
 
 
 def remove_from_watchlist(symbol: str, db_path: str | Path = DB_PATH) -> list[str]:
-    with _connect(db_path) as conn:
+    with _write_lock, _connect(db_path) as conn:
         conn.execute("DELETE FROM watchlist WHERE symbol = ?", (_normaliser(symbol),))
         conn.commit()
         return _watchlist(conn)
@@ -135,12 +165,24 @@ def log_query(
     tools_called: list[str],
     answer_summary: str,
     db_path: str | Path = DB_PATH,
+    *,
+    as_of_used: str | None = None,
+    data_through: str | None = None,
+    key_numbers: str | None = None,
+    grounded: bool | None = None,
+    guard_action: str | None = None,
 ) -> int:
-    with _connect(db_path) as conn:
+    """Log one agent turn. The first four positional parameters are the
+    original signature; the grounding columns are optional keywords.
+    ``guard_action`` is one of 'pass' | 'repaired' | 'flagged' (NULL when the
+    guard did not apply to the turn)."""
+    with _write_lock, _connect(db_path) as conn:
         cur = conn.execute(
-            "INSERT INTO history(ts, question, tools_called, answer_summary)"
-            " VALUES (?, ?, ?, ?)",
-            (_now(), question, json.dumps(list(tools_called)), answer_summary),
+            "INSERT INTO history(ts, question, tools_called, answer_summary,"
+            " as_of_used, data_through, key_numbers, grounded, guard_action)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (_now(), question, json.dumps(list(tools_called)), answer_summary,
+             as_of_used, data_through, key_numbers, grounded, guard_action),
         )
         conn.commit()
         return int(cur.lastrowid)
@@ -156,13 +198,15 @@ def recent_queries(limit: int = 10, db_path: str | Path = DB_PATH,
     with _connect(db_path) as conn:
         if query:
             rows = conn.execute(
-                "SELECT id, ts, question, tools_called, answer_summary"
+                "SELECT id, ts, question, tools_called, answer_summary,"
+                " as_of_used, data_through, key_numbers, grounded, guard_action"
                 " FROM history WHERE question LIKE ? ORDER BY id DESC LIMIT ?",
                 (f"%{query}%", int(limit)),
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT id, ts, question, tools_called, answer_summary"
+                "SELECT id, ts, question, tools_called, answer_summary,"
+                " as_of_used, data_through, key_numbers, grounded, guard_action"
                 " FROM history ORDER BY id DESC LIMIT ?",
                 (int(limit),),
             ).fetchall()
@@ -172,7 +216,7 @@ def recent_queries(limit: int = 10, db_path: str | Path = DB_PATH,
 # ---------------- preferences ----------------
 
 def set_preference(key: str, value: str, db_path: str | Path = DB_PATH) -> None:
-    with _connect(db_path) as conn:
+    with _write_lock, _connect(db_path) as conn:
         conn.execute(
             "INSERT OR REPLACE INTO preferences(key, value) VALUES (?, ?)",
             (key, str(value)),
@@ -186,3 +230,32 @@ def get_preference(key: str, default: str | None = None, db_path: str | Path = D
             "SELECT value FROM preferences WHERE key = ?", (key,)
         ).fetchone()
     return row[0] if row else default
+
+
+# ---------------- context for the model ----------------
+
+CONTEXT_PREF_KEYS = ("default_metric", "default_benchmark", "default_index")
+
+
+def context_block(db_path: str | Path = DB_PATH) -> str:
+    """Compact durable-memory summary for the model (<= ~600 chars).
+
+    Watchlist, the known preferences, and the last 3 questions with dates.
+    Empty DB -> "" (no padding lines).
+    """
+    lines: list[str] = []
+    watchlist = list_watchlist(db_path)
+    if watchlist:
+        lines.append("Watchlist: " + ", ".join(watchlist))
+    prefs = []
+    for key in CONTEXT_PREF_KEYS:
+        value = get_preference(key, db_path=db_path)
+        if value:
+            prefs.append(f"{key}={value}")
+    if prefs:
+        lines.append("Preferences: " + "; ".join(prefs))
+    for row in recent_queries(3, db_path):
+        question = str(row["question"]).replace("\n", " ")[:80]
+        lines.append(f"{row['ts'][:10]} asked: {question}")
+    block = "\n".join(lines)
+    return block[:600]

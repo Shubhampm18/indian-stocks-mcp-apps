@@ -17,8 +17,16 @@ from __future__ import annotations
 import memory as mem
 from agent import Agent, make_client
 from client import server_params
+from langgraph.errors import GraphRecursionError
 from mcp import ClientSession
 from mcp.client.stdio import stdio_client
+
+
+def _handle_error(exc: Exception) -> str:
+    """One-line REPL error message; the session stays alive."""
+    if isinstance(exc, GraphRecursionError):
+        return "hit the step limit: the agent stopped early; try a narrower question."
+    return f"provider error: {exc}"
 
 
 async def main() -> int:
@@ -36,7 +44,7 @@ async def main() -> int:
 
             watchlist = mem.list_watchlist()
             recent = mem.recent_queries(3)
-            print("Stock Agent (MCP + LLM + memory). Type 'quit' to exit.")
+            print("stock agent - NSE/BSE, cut off at the date you ask. Type 'quit' to exit.")
             print(f"Watchlist on file: {watchlist or '[]'}")
             if recent:
                 print("Recent topics:")
@@ -64,7 +72,7 @@ async def main() -> int:
                 try:
                     answer = await agent.ask(question)
                 except Exception as exc:  # keep the loop alive on LLM errors
-                    print(f"Error: {exc}")
+                    print(_handle_error(exc))
                     continue
                 print(f"agent: {answer}\n")
     print("Bye.")

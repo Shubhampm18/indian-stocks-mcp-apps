@@ -50,6 +50,7 @@ EXPECTED_TOOLS = {
     "get_ohlcv",
     "get_returns",
     "get_technical_indicators",
+    "get_chart_patterns",
     "get_risk_metrics",
     "get_index_history",
     "get_peer_comparison",
@@ -146,6 +147,11 @@ async def main() -> int:
             if missing:
                 print(f"Missing expected tools: {sorted(missing)}", file=sys.stderr)
                 return 1
+            extra = set(names) - EXPECTED_TOOLS
+            if extra:
+                print(f"Unexpected extra tools: {sorted(extra)}", file=sys.stderr)
+                return 1
+            print(f"{len(names)}/{len(EXPECTED_TOOLS)} tools")
 
             if args.demo:
                 return await _run_demos(session)
