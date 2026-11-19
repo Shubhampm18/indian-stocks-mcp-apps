@@ -20,6 +20,7 @@ Without a key the agent refuses to start — the MCP client demos
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -63,7 +64,11 @@ STATIC_PROMPT = """You are a stock research agent for India (NSE/BSE) stocks.
 - Keep answers short: the key number, the rank/trend, then data_through.
 """
 
-RECURSION_LIMIT = 12
+# Recursion budget: in langchain 1.5 each middleware hook node
+# (before_model / after_model) counts as a step, so one model call costs
+# ~3 (hook + model + guard) plus one more per tool round-trip. 12 would
+# abort after ~2 tool calls; 30 still bounds the loop hard (~7-8 calls).
+RECURSION_LIMIT = 30
 
 
 def make_client() -> Any:
@@ -117,29 +122,41 @@ class Agent:
     """
 
     def __init__(self, session, client, db_path: str | Path | None = None,
-                 history_limit: int = 20):
+                 history_limit: int = 20, tools: list | None = None):
         self.session = session
         self.client = client  # a BaseChatModel (e.g. ChatOpenAI or a fake)
         self.db_path = db_path
         self.history_limit = history_limit
+        # Test seam: extra tools appended to the server's (tests stand in a
+        # fake server tool offline; live runs pass None).
+        self._extra_tools = list(tools or [])
         # Live conversation (Human/AI/Tool messages); the system prompt is
         # STATIC_PROMPT, applied by the graph at every model call.
         self.messages: list[BaseMessage] = []
         self._graph = None  # built lazily: load_mcp_tools needs an async ctx
+        self._guard = None  # GroundingGuard ref (grounding columns for history)
 
     async def _ensure_graph(self):
         if self._graph is None:
             from langchain.agents import create_agent
             from langchain_mcp_adapters.tools import load_mcp_tools
+            from middleware import GroundingGuard, MemoryContext, PreferenceDefaults
             from tools_memory import build_memory_tools
 
             server_tools = (
                 await load_mcp_tools(self.session) if self.session is not None else []
             )
+            self._guard = GroundingGuard(model=self.client, db_path=self.db_path)
             self._graph = create_agent(
                 model=self.client,
-                tools=server_tools + build_memory_tools(self.db_path),
+                tools=server_tools + self._extra_tools
+                + build_memory_tools(self.db_path),
                 system_prompt=STATIC_PROMPT,
+                middleware=[
+                    MemoryContext(db_path=self.db_path),
+                    PreferenceDefaults(db_path=self.db_path),
+                    self._guard,
+                ],
             )
         return self._graph
 
@@ -154,6 +171,11 @@ class Agent:
         )
         all_msgs: list[BaseMessage] = result["messages"]
         new_msgs = all_msgs[input_len:]
+        tool_args = [
+            call.get("args") or {}
+            for m in new_msgs if isinstance(m, AIMessage)
+            for call in (m.tool_calls or [])
+        ]
         tools_called = [
             call["name"]
             for m in new_msgs if isinstance(m, AIMessage)
@@ -165,11 +187,44 @@ class Agent:
         ).strip() or "(agent produced no text)"
         # Keep only recent turns so the model context stays small.
         self.messages = all_msgs[-(self.history_limit * 2):]
-        if self.db_path is not None:
-            mem.log_query(question, tools_called, answer[:500], self.db_path)
-        else:
-            mem.log_query(question, tools_called, answer[:500])
+        # Grounding columns for history (3.5); None when the guard didn't run.
+        as_of_used = ", ".join(
+            sorted({str(a["as_of"]) for a in tool_args if a.get("as_of")})
+        ) or None
+        data_through = self._data_through(new_msgs)
+        guard = getattr(self, "_guard", None)
+        grounded = guard.last_result["grounded"] if guard and guard.last_result else None
+        key_numbers = None
+        if guard and guard.last_result:
+            claims = guard.last_result.get("claims") or []
+            key_numbers = json.dumps([c["token"] for c in claims],
+                                     ensure_ascii=False) if claims else None
+        self._log(question, tools_called, answer, as_of_used, data_through,
+                  key_numbers, grounded)
         return answer
+
+    def _data_through(self, new_msgs: list[BaseMessage]) -> str | None:
+        """Pull data_through out of this turn's tool payloads (first hit)."""
+        for m in new_msgs:
+            if type(m).__name__ == "ToolMessage":
+                try:
+                    payload = json.loads(_text_of(m))
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    continue
+                if isinstance(payload, dict) and payload.get("data_through"):
+                    return str(payload["data_through"])
+        return None
+
+    def _log(self, question, tools_called, answer, as_of_used, data_through,
+             key_numbers, grounded) -> None:
+        if self.db_path is not None:
+            mem.log_query(question, tools_called, answer[:500], self.db_path,
+                          as_of_used=as_of_used, data_through=data_through,
+                          key_numbers=key_numbers, grounded=grounded)
+        else:
+            mem.log_query(question, tools_called, answer[:500],
+                          as_of_used=as_of_used, data_through=data_through,
+                          key_numbers=key_numbers, grounded=grounded)
 
 
 __all__ = ["Agent", "STATIC_PROMPT", "make_client"]

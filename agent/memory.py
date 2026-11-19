@@ -76,13 +76,33 @@ CREATE TABLE IF NOT EXISTS history (
     ts             TEXT NOT NULL,
     question       TEXT NOT NULL,
     tools_called   TEXT NOT NULL DEFAULT '[]',
-    answer_summary TEXT NOT NULL DEFAULT ''
+    answer_summary TEXT NOT NULL DEFAULT '',
+    as_of_used     TEXT,
+    data_through   TEXT,
+    key_numbers    TEXT,
+    grounded       INTEGER
 );
 CREATE TABLE IF NOT EXISTS preferences (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
 """
+
+# Columns added after the first release; old DBs are migrated on connect so
+# they keep opening (PRAGMA table_info guards the ALTER).
+_HISTORY_MIGRATION_COLUMNS = (
+    ("as_of_used", "TEXT"),
+    ("data_through", "TEXT"),
+    ("key_numbers", "TEXT"),
+    ("grounded", "INTEGER"),
+)
+
+
+def _migrate_history(conn: sqlite3.Connection) -> None:
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(history)")}
+    for col, ddl in _HISTORY_MIGRATION_COLUMNS:
+        if col not in existing:
+            conn.execute(f"ALTER TABLE history ADD COLUMN {col} {ddl}")
 
 
 def _connect(db_path: str | Path = DB_PATH) -> sqlite3.Connection:
@@ -91,6 +111,7 @@ def _connect(db_path: str | Path = DB_PATH) -> sqlite3.Connection:
     # WAL lets concurrent readers proceed during a write (parallel tool calls).
     conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(SCHEMA)
+    _migrate_history(conn)
     conn.commit()
     return conn
 
@@ -142,12 +163,21 @@ def log_query(
     tools_called: list[str],
     answer_summary: str,
     db_path: str | Path = DB_PATH,
+    *,
+    as_of_used: str | None = None,
+    data_through: str | None = None,
+    key_numbers: str | None = None,
+    grounded: bool | None = None,
 ) -> int:
+    """Log one agent turn. The first four positional parameters are the
+    original signature; the grounding columns are optional keywords."""
     with _write_lock, _connect(db_path) as conn:
         cur = conn.execute(
-            "INSERT INTO history(ts, question, tools_called, answer_summary)"
-            " VALUES (?, ?, ?, ?)",
-            (_now(), question, json.dumps(list(tools_called)), answer_summary),
+            "INSERT INTO history(ts, question, tools_called, answer_summary,"
+            " as_of_used, data_through, key_numbers, grounded)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (_now(), question, json.dumps(list(tools_called)), answer_summary,
+             as_of_used, data_through, key_numbers, grounded),
         )
         conn.commit()
         return int(cur.lastrowid)
@@ -163,13 +193,15 @@ def recent_queries(limit: int = 10, db_path: str | Path = DB_PATH,
     with _connect(db_path) as conn:
         if query:
             rows = conn.execute(
-                "SELECT id, ts, question, tools_called, answer_summary"
+                "SELECT id, ts, question, tools_called, answer_summary,"
+                " as_of_used, data_through, key_numbers, grounded"
                 " FROM history WHERE question LIKE ? ORDER BY id DESC LIMIT ?",
                 (f"%{query}%", int(limit)),
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT id, ts, question, tools_called, answer_summary"
+                "SELECT id, ts, question, tools_called, answer_summary,"
+                " as_of_used, data_through, key_numbers, grounded"
                 " FROM history ORDER BY id DESC LIMIT ?",
                 (int(limit),),
             ).fetchall()
@@ -193,3 +225,32 @@ def get_preference(key: str, default: str | None = None, db_path: str | Path = D
             "SELECT value FROM preferences WHERE key = ?", (key,)
         ).fetchone()
     return row[0] if row else default
+
+
+# ---------------- context for the model ----------------
+
+CONTEXT_PREF_KEYS = ("default_metric", "default_benchmark", "default_index")
+
+
+def context_block(db_path: str | Path = DB_PATH) -> str:
+    """Compact durable-memory summary for the model (<= ~600 chars).
+
+    Watchlist, the known preferences, and the last 3 questions with dates.
+    Empty DB -> "" (no padding lines).
+    """
+    lines: list[str] = []
+    watchlist = list_watchlist(db_path)
+    if watchlist:
+        lines.append("Watchlist: " + ", ".join(watchlist))
+    prefs = []
+    for key in CONTEXT_PREF_KEYS:
+        value = get_preference(key, db_path=db_path)
+        if value:
+            prefs.append(f"{key}={value}")
+    if prefs:
+        lines.append("Preferences: " + "; ".join(prefs))
+    for row in recent_queries(3, db_path):
+        question = str(row["question"]).replace("\n", " ")[:80]
+        lines.append(f"{row['ts'][:10]} asked: {question}")
+    block = "\n".join(lines)
+    return block[:600]
