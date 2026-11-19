@@ -528,7 +528,7 @@ requires-dist = [
 [[package]]
 name = "indian-stocks-mcp"
 version = "0.3.0"
-source = { git = "https://github.com/Shubhampm18/indian-stocks-mcp?tag=v0.3.0#9ff76370b7caa3e403f10d35e4b164efce262214" }
+source = { git = "https://github.com/Shubhampm18/indian-stocks-mcp?tag=v0.3.0#f6b39fbb3a67f5fdcfaaddaa1e091fb14cf10e61" }
 dependencies = [
     { name = "mcp" },
     { name = "numpy" },
