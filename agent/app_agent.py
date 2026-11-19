@@ -100,6 +100,23 @@ def make_client() -> Any:
                       timeout=timeout, max_retries=2)
 
 
+def _trim_to_turns(messages: list[BaseMessage], max_turns: int) -> list[BaseMessage]:
+    """Keep the last ``max_turns`` complete exchanges.
+
+    Trimming by raw message count can cut between an AIMessage(tool_calls) and
+    the ToolMessages that answer it; OpenAI-compatible providers then reject
+    the next request with a 400 ("tool message must follow tool_calls").
+    Cutting at a HumanMessage boundary keeps every call/result pair intact and
+    guarantees the window starts a turn, not ends one.
+    """
+    if max_turns <= 0:
+        return []
+    starts = [i for i, m in enumerate(messages) if isinstance(m, HumanMessage)]
+    if len(starts) <= max_turns:
+        return list(messages)
+    return list(messages[starts[-max_turns]:])
+
+
 def _text_of(message: BaseMessage) -> str:
     """AIMessage.content may be str or a list of content blocks; get the text."""
     content = message.content
@@ -185,8 +202,9 @@ class Agent:
             (_text_of(m) for m in reversed(all_msgs) if isinstance(m, AIMessage)),
             "",
         ).strip() or "(agent produced no text)"
-        # Keep only recent turns so the model context stays small.
-        self.messages = all_msgs[-(self.history_limit * 2):]
+        # Keep only recent turns so the model context stays small — but never
+        # cut a tool call away from its result (see _trim_to_turns).
+        self.messages = _trim_to_turns(all_msgs, self.history_limit)
         # Grounding columns for history (3.5); None when the guard didn't run.
         as_of_used = ", ".join(
             sorted({str(a["as_of"]) for a in tool_args if a.get("as_of")})
