@@ -312,3 +312,32 @@ def test_guard_load_bearing_through_agent(tmp_path):
     assert row["grounded"] == 1  # SQLite INTEGER (bools stored as 0/1)
     assert row["as_of_used"] == "2025-12-31"
     assert row["data_through"] == "2025-12-31"
+
+
+def test_three_parallel_calls_in_one_graph_step(tmp_path):
+    """One AIMessage with three tool_calls runs in a single tool-node step;
+    all three effects persist (WAL + write lock hold under the graph's
+    parallel execution)."""
+    db = str(tmp_path / "par3.db")
+    scripted = [
+        AIMessage(
+            content="",
+            tool_calls=[
+                {"name": "add_to_watchlist", "args": {"symbol": "TCS.NS"},
+                 "id": "p1", "type": "tool_call"},
+                {"name": "add_to_watchlist", "args": {"symbol": "RELIANCE.NS"},
+                 "id": "p2", "type": "tool_call"},
+                {"name": "set_preference",
+                 "args": {"key": "default_metric", "value": "return_20d"},
+                 "id": "p3", "type": "tool_call"},
+            ],
+        ),
+        AIMessage(content="Added both symbols and saved the metric."),
+    ]
+    agent_obj = Agent(session=None, client=FakeChatModel(scripted=scripted), db_path=db)
+    answer = asyncio.run(agent_obj.ask("track TCS and RELIANCE, default to return_20d"))
+    assert "Added both symbols" in answer
+    assert mem.list_watchlist(db) == ["RELIANCE.NS", "TCS.NS"]
+    assert mem.get_preference("default_metric", db_path=db) == "return_20d"
+    row = mem.recent_queries(1, db)[0]
+    assert sorted(json.loads(row["tools_called"])) == ["add_to_watchlist", "add_to_watchlist", "set_preference"]
