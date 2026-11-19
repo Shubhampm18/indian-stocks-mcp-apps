@@ -53,7 +53,7 @@ _load_dotenv()
 
 # Honesty rules only — tool-selection mechanics live in the tools' own
 # descriptions now (server docstrings + tools_memory docstrings).
-STATIC_PROMPT = """You are a stock research agent for India (NSE/BSE) stocks.
+STATIC_PROMPT = """You are a stock agent for India (NSE/BSE) equities.
 - Never invent numbers: compute every figure from tool output.
 - State `data_through` alongside any number you quote.
 - Always pass `as_of` (YYYY-MM-DD) when the user gives a date.

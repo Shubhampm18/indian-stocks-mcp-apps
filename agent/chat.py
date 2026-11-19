@@ -36,7 +36,7 @@ async def main() -> int:
 
             watchlist = mem.list_watchlist()
             recent = mem.recent_queries(3)
-            print("Stock Agent (MCP + LLM + memory). Type 'quit' to exit.")
+            print("stock agent - NSE/BSE, cut off at the date you ask. Type 'quit' to exit.")
             print(f"Watchlist on file: {watchlist or '[]'}")
             if recent:
                 print("Recent topics:")
