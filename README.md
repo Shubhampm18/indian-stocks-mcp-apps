@@ -94,17 +94,30 @@ Sidebar: symbol, `as_of` date, lookback. Pages: candlestick with pattern markers
 - **Single source**: yfinance, via the server. If yfinance is wrong or
   stale, both apps repeat the same wrong numbers.
 - **One agent, one flat tool list** — no sub-agents, no task decomposition.
+- **The guard scans server payloads only (strict mixed-turn policy)**: in a
+  turn that calls server tools and memory tools, only the server payloads
+  validate quoted figures. A legitimate figure that exists solely in a
+  memory payload costs one repair call — the accepted price for never
+  passing recalled context off as fresh tool data.
 - **Memory is context, never authority**: the watchlist/history is shown to
   the model as context; figures quoted to the user must come from tool
   output in the current turn (the GroundingGuard enforces this), not from
-  recalled history.
+  recalled history. A turn with no tool call at all that still quotes
+  figures is prefixed `(unverified: N figures)`.
+- **Matching is unit-blind**: the guard compares numbers, not units. A
+  "1570.40x" ratio matches a payload price of 1570.4 numerically, and
+  "1.57 lakh" matches only a payload that itself writes "1.57 lakh", not one
+  holding 157000.0. Sign is ignored ("fell -19.8%" grounds against an
+  unsigned drawdown 19.8) because payloads store drawdowns unsigned.
 - **Chart patterns**: the detector scans only the last `window` bars
   (default 20) — the prompt tells the model to widen `window` before
   declaring a pattern absent for older dates.
 
 ## Cost of the LangChain move
 
-- `time uv run python -c "import app_agent"` → **1.5 s** wall (Windows, warm venv).
+- `time uv run python -c "import app_agent"` → **~3.3 s** wall (Windows, Git
+  Bash, warm venv; measured 3× after the Phase A pass — up from 1.5 s before
+  it, driven by the async middleware hooks in langchain 1.5).
 - Dependency count (uv.lock entries): **73 → 96** packages (langchain,
   langchain-core, langchain-openai, langchain-mcp-adapters, langgraph×4,
   langsmith, plus their transitive deps). The `mcp==1.12.4` pin is
