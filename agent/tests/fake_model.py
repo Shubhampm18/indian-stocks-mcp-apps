@@ -29,20 +29,36 @@ class FakeChatModel(BaseChatModel):
     def bind_tools(self, tools, **kwargs):
         return self
 
-    def _generate(self, messages, stop=None, run_manager=None, **kwargs) -> ChatResult:
+    def _next_message(self) -> AIMessage:
+        """The next scripted message (shared by the sync and async paths)."""
         if not self.scripted:
-            msg = AIMessage(content="")
-        elif self.i < len(self.scripted):
+            return AIMessage(content="")
+        if self.i < len(self.scripted):
             msg = self.scripted[self.i]
         elif self.repeat_last:
             msg = self.scripted[-1]
         else:  # pragma: no cover - defensive
             raise RuntimeError(f"script exhausted after {self.i} calls")
         self.i += 1
-        return ChatResult(generations=[ChatGeneration(message=msg)])
+        return msg
+
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs) -> ChatResult:
+        return ChatResult(generations=[ChatGeneration(message=self._next_message())])
 
     async def _agenerate(self, messages, stop=None, run_manager=None, **kwargs) -> ChatResult:
-        return self._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
+        return ChatResult(generations=[ChatGeneration(message=self._next_message())])
+
+
+class AsyncOnlyFakeChatModel(FakeChatModel):
+    """Scripted model exposing only the async path.
+
+    ``_generate`` raises, so any sync ``.invoke()`` through this model fails
+    loudly — used to prove the guard's repair call went through
+    ``ainvoke`` (A3) instead of blocking the event loop.
+    """
+
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs) -> ChatResult:
+        raise NotImplementedError("async-only model: the sync path must not be used")
 
 
 def tool_call(name: str, args: dict[str, Any], call_id: str) -> AIMessage:

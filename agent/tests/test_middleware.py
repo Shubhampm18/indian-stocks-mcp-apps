@@ -224,6 +224,11 @@ def test_memory_context_appended_to_system_message(tmp_path):
             captured.append(messages[0].content)
             return super()._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
 
+        async def _agenerate(self, messages, stop=None, run_manager=None, **kwargs):
+            captured.append(messages[0].content)
+            return await super()._agenerate(messages, stop=stop,
+                                            run_manager=run_manager, **kwargs)
+
     scripted = [AIMessage(content="ok")]
     graph = create_agent(
         model=Spy(scripted=scripted),

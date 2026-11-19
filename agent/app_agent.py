@@ -7,7 +7,7 @@ here. The six memory tools are local ``@tool`` functions (tools_memory.py)
 bound to the same SQLite file as memory.py.
 
 The LLM provider is configurable by environment:
-  LLM_API_KEY   required (or a provider-specific key such as OPENAI_API_KEY)
+  LLM_API_KEY   required (or OPENAI_API_KEY)
   LLM_BASE_URL  OpenAI-compatible base URL (optional)
   LLM_MODEL     model name (optional, default "gpt-4o-mini")
   LLM_TIMEOUT_SECONDS
@@ -26,7 +26,12 @@ from pathlib import Path
 from typing import Any
 
 import memory as mem
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    ToolMessage,
+)
 
 
 def _load_dotenv() -> None:
@@ -73,11 +78,7 @@ RECURSION_LIMIT = 30
 
 def make_client() -> Any:
     """Build the chat model from env vars. Raises if no key is configured."""
-    key = (
-        os.environ.get("LLM_API_KEY")
-        or os.environ.get("OPENAI_API_KEY")
-        or os.environ.get("ANTHROPIC_API_KEY")
-    )
+    key = os.environ.get("LLM_API_KEY") or os.environ.get("OPENAI_API_KEY")
     if not key:
         raise RuntimeError(
             "No LLM API key configured. Set LLM_API_KEY (or OPENAI_API_KEY) "
@@ -209,7 +210,7 @@ class Agent:
         as_of_used = ", ".join(
             sorted({str(a["as_of"]) for a in tool_args if a.get("as_of")})
         ) or None
-        data_through = self._data_through(new_msgs)
+        data_through = self._data_through(new_msgs, answer)
         guard = getattr(self, "_guard", None)
         grounded = guard.last_result["grounded"] if guard and guard.last_result else None
         key_numbers = None
@@ -221,17 +222,35 @@ class Agent:
                   key_numbers, grounded)
         return answer
 
-    def _data_through(self, new_msgs: list[BaseMessage]) -> str | None:
-        """Pull data_through out of this turn's tool payloads (first hit)."""
+    def _data_through(self, new_msgs: list[BaseMessage], answer: str) -> str | None:
+        """``data_through`` from the payload the answer actually quotes.
+
+        In a multi-tool turn the first payload with data_through is often the
+        wrong one (get_ohlcv's date when the answer quotes get_returns
+        figures), so prefer the payload whose numbers appear in the answer;
+        fall back to the first payload that has data_through.
+        """
+        from middleware import _matches, collect_numbers, extract_claims
+
+        payloads: list[dict[str, Any]] = []
         for m in new_msgs:
-            if type(m).__name__ == "ToolMessage":
+            if isinstance(m, ToolMessage):
                 try:
                     payload = json.loads(_text_of(m))
                 except (json.JSONDecodeError, TypeError, ValueError):
                     continue
                 if isinstance(payload, dict) and payload.get("data_through"):
+                    payloads.append(payload)
+        if not payloads:
+            return None
+        claims = extract_claims(answer)
+        if claims:
+            for payload in payloads:
+                numbers: list[float] = []
+                collect_numbers(payload, numbers)
+                if any(_matches(c["value"], numbers) for c in claims):
                     return str(payload["data_through"])
-        return None
+        return str(payloads[0]["data_through"])
 
     def _log(self, question, tools_called, answer, as_of_used, data_through,
              key_numbers, grounded) -> None:

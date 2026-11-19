@@ -233,12 +233,12 @@ class GroundingGuard(AgentMiddleware):
 
     # -- guard --------------------------------------------------------------
 
-    def after_model(self, state, runtime):
-        messages = state["messages"]
-        last = messages[-1] if messages else None
-        self.last_result = None
-        if not isinstance(last, AIMessage) or last.tool_calls:
-            return None  # tool calls route to the tool node, not the answer
+    def _analyze(self, messages: list, last: AIMessage) -> dict[str, Any] | None:
+        """Shared analysis for the sync and async paths.
+
+        Sets ``last_result`` and returns None when no repair is needed
+        (skipped turn / already grounded); otherwise returns the repair plan.
+        """
         turn_msgs = self._this_turn_messages(messages)
         texts = self._server_tool_texts(turn_msgs)
         if not texts:
@@ -261,11 +261,12 @@ class GroundingGuard(AgentMiddleware):
             f"{repair_prompt}\n\nTool output:\n" + "\n---\n".join(texts)[:6000]
             + f"\n\nYour draft answer:\n{draft}"
         )
-        repaired = self.model.invoke([HumanMessage(content=repair_input)])
-        repaired_text = _message_text(repaired.content) if isinstance(repaired, AIMessage) \
-            else str(repaired)
+        return {"last_id": last.id, "numbers": numbers, "repair_input": repair_input}
+
+    def _finish(self, plan: dict[str, Any], repaired_text: str) -> dict[str, Any]:
+        """Shared repair verdict for the sync and async paths."""
         claims2 = extract_claims(repaired_text)
-        unmatched2 = [c for c in claims2 if not _matches(c["value"], numbers)]
+        unmatched2 = [c for c in claims2 if not _matches(c["value"], plan["numbers"])]
         if not unmatched2:
             self.last_result = {"grounded": True, "claims": claims2,
                                 "repaired": True}
@@ -274,8 +275,38 @@ class GroundingGuard(AgentMiddleware):
             self.last_result = {"grounded": False, "claims": claims2,
                                 "unmatched": unmatched2}
             replacement = f"(unverified: {len(unmatched2)} figures) {repaired_text}".strip()
-        return {"messages": [RemoveMessage(id=last.id),
+        return {"messages": [RemoveMessage(id=plan["last_id"]),
                              AIMessage(content=replacement)]}
+
+    def after_model(self, state, runtime):
+        messages = state["messages"]
+        last = messages[-1] if messages else None
+        self.last_result = None
+        if not isinstance(last, AIMessage) or last.tool_calls:
+            return None  # tool calls route to the tool node, not the answer
+        plan = self._analyze(messages, last)
+        if plan is None:
+            return None
+        repaired = self.model.invoke([HumanMessage(content=plan["repair_input"])])
+        repaired_text = _message_text(repaired.content) if isinstance(repaired, AIMessage) \
+            else str(repaired)
+        return self._finish(plan, repaired_text)
+
+    async def aafter_model(self, state, runtime):
+        """Async twin of after_model — the repair call must not block the
+        event loop on every ungrounded answer. Same logic, shared helpers."""
+        messages = state["messages"]
+        last = messages[-1] if messages else None
+        self.last_result = None
+        if not isinstance(last, AIMessage) or last.tool_calls:
+            return None  # tool calls route to the tool node, not the answer
+        plan = self._analyze(messages, last)
+        if plan is None:
+            return None
+        repaired = await self.model.ainvoke([HumanMessage(content=plan["repair_input"])])
+        repaired_text = _message_text(repaired.content) if isinstance(repaired, AIMessage) \
+            else str(repaired)
+        return self._finish(plan, repaired_text)
 
 
 __all__ = [
