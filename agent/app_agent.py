@@ -32,6 +32,7 @@ from langchain_core.messages import (
     HumanMessage,
     ToolMessage,
 )
+from middleware import _matches, collect_numbers, extract_claims
 
 
 def _load_dotenv() -> None:
@@ -231,8 +232,6 @@ class Agent:
         figures), so prefer the payload whose numbers appear in the answer;
         fall back to the first payload that has data_through.
         """
-        from middleware import _matches, collect_numbers, extract_claims
-
         payloads: list[dict[str, Any]] = []
         for m in new_msgs:
             if isinstance(m, ToolMessage):
