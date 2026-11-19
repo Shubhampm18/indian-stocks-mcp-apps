@@ -312,8 +312,15 @@ class GroundingGuard(AgentMiddleware):
             f"These figures are not in the tool output: {listing}. "
             "Rewrite using only tool numbers, or say you cannot."
         )
+        # A 7-tool turn can exceed any excerpt, and slicing the payload text
+        # can cut off exactly the figures the repair needs -> a false
+        # "(unverified)" flag. Lead with the COMPLETE number list collected
+        # from the payloads (compact, bounded), then a short excerpt.
+        number_list = ", ".join(f"{n:g}" for n in sorted({round(n, 4) for n in numbers}))
         repair_input = (
-            f"{repair_prompt}\n\nTool output:\n" + "\n---\n".join(texts)[:6000]
+            f"{repair_prompt}\n\nNumbers present in the tool output:\n"
+            f"{number_list}\n\nTool output (excerpt):\n"
+            + "\n---\n".join(texts)[:1200]
             + f"\n\nYour draft answer:\n{draft}"
         )
         return {"last_id": last.id, "numbers": numbers, "repair_input": repair_input}

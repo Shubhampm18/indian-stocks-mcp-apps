@@ -115,6 +115,10 @@ Sidebar: symbol, `as_of` date, lookback. Pages: candlestick with pattern markers
 - **Chart patterns**: the detector scans only the last `window` bars
   (default 20) — the prompt tells the model to widen `window` before
   declaring a pattern absent for older dates.
+- **Live proof blocked**: no `LLM_API_KEY`/`OPENAI_API_KEY` was configured in
+  this environment, so the NVIDIA endpoint's acceptance of ChatOpenAI's
+  standard message shape (since `_normalise_messages` was removed) is
+  unverified — run the two live transcripts in Phase L before trusting it.
 
 ## Cost of the LangChain move
 
