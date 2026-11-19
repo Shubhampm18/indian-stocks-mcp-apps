@@ -71,210 +71,6 @@ You have 7 tools over historical price data. Rules:
 - Keep answers short: the key number, the rank/trend, then data_through.
 """
 
-STOCK_TOOL_SCHEMAS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "get_ohlcv",
-            "description": "Daily OHLC + rebuilt adjusted close for a symbol.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "symbol": {"type": "string"},
-                    "as_of": {"type": "string"},
-                    "lookback_days": {"type": "integer"},
-                },
-                "required": ["symbol"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_returns",
-            "description": "Simple/log returns over windows.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "symbol": {"type": "string"},
-                    "as_of": {"type": "string"},
-                    "windows": {"type": "array", "items": {"type": "integer"}},
-                },
-                "required": ["symbol"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_technical_indicators",
-            "description": "SMA/EMA/RSI/MACD/Bollinger/ATR/VWAP + trend.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "symbol": {"type": "string"},
-                    "as_of": {"type": "string"},
-                    "indicators": {"type": "array", "items": {"type": "string"}},
-                },
-                "required": ["symbol"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_chart_patterns",
-            "description": ("Candlestick patterns (hammer, doji, engulfing, stars) and "
-                            "support/resistance levels. Only the last `window` bars "
-                            "(default 20) are scanned — raise window to look further back."),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "symbol": {"type": "string"},
-                    "as_of": {"type": "string"},
-                    "lookback_days": {"type": "integer"},
-                    "window": {"type": "integer",
-                               "description": "Trailing-bar scan width for the detector (default 20)."},
-                },
-                "required": ["symbol"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_risk_metrics",
-            "description": "Sharpe/Sortino/max drawdown/volatility/beta/alpha.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "symbol": {"type": "string"},
-                    "as_of": {"type": "string"},
-                    "benchmark": {"type": "string"},
-                    "lookback_days": {"type": "integer"},
-                },
-                "required": ["symbol"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_index_history",
-            "description": "Index close history (^NSEI, ^BSESN, ^NSEBANK).",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "index": {"type": "string"},
-                    "as_of": {"type": "string"},
-                    "lookback_days": {"type": "integer"},
-                },
-                "required": ["index"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_peer_comparison",
-            "description": "Rank peers on one metric (return_20d, return_60d, vol_60d, sharpe_60d, drawdown_60d, rsi_14).",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "symbols": {"type": "array", "items": {"type": "string"}},
-                    "as_of": {"type": "string"},
-                    "metric": {"type": "string"},
-                },
-                "required": ["symbols"],
-            },
-        },
-    },
-]
-
-MEMORY_TOOL_SCHEMAS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "add_to_watchlist",
-            "description": "Add a symbol to the user's durable watchlist.",
-            "parameters": {
-                "type": "object",
-                "properties": {"symbol": {"type": "string"}},
-                "required": ["symbol"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "remove_from_watchlist",
-            "description": "Remove a symbol from the watchlist.",
-            "parameters": {
-                "type": "object",
-                "properties": {"symbol": {"type": "string"}},
-                "required": ["symbol"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_watchlist",
-            "description": "List the user's watchlist symbols.",
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "recall_history",
-            "description": ("Recall past questions/answers (durable memory). "
-                            "Optional `query` filters by question text; without it, "
-                            "the most recent turns are returned."),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "limit": {"type": "integer"},
-                    "query": {"type": "string"},
-                },
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "set_preference",
-            "description": ("Save a durable user preference (e.g. key='default_symbol', "
-                            "value='RELIANCE.NS'). Overwrites the existing value for the key."),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "key": {"type": "string"},
-                    "value": {"type": "string"},
-                },
-                "required": ["key", "value"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_preference",
-            "description": "Read a durable user preference by key.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "key": {"type": "string"},
-                    "default": {"type": "string"},
-                },
-                "required": ["key"],
-            },
-        },
-    },
-]
-
-ALL_TOOLS = STOCK_TOOL_SCHEMAS + MEMORY_TOOL_SCHEMAS
-
 MAX_TOOL_STEPS = 6
 
 
@@ -388,42 +184,25 @@ def make_client() -> LLMClient:
 
 
 def _extract_payload(result) -> dict[str, Any]:
-    text = getattr(result.content[0], "text", "") if result.content else ""
+    """Server-tool payloads arrive as JSON text (FastMCP content[0]);
+    parse, falling back to a raw envelope for non-JSON output."""
+    if isinstance(result, str):
+        text = result
+    else:
+        text = getattr(result.content[0], "text", "") if getattr(result, "content", None) else ""
     try:
         return json.loads(text)
     except (json.JSONDecodeError, TypeError):
-        return {"raw_text": text, "isError": bool(getattr(result, "isError", False))}
-
-
-MEMORY_TOOL_NAMES = (
-    "add_to_watchlist", "remove_from_watchlist", "list_watchlist",
-    "recall_history", "set_preference", "get_preference",
-)
-
-
-async def run_memory_tool(name: str, args: dict[str, Any], db_path: str | Path | None = None) -> Any:
-    """Execute a memory tool locally (against SQLite)."""
-    path = db_path if db_path is not None else mem.DB_PATH
-    if name == "add_to_watchlist":
-        return mem.add_to_watchlist(str(args["symbol"]), path)
-    if name == "remove_from_watchlist":
-        return mem.remove_from_watchlist(str(args["symbol"]), path)
-    if name == "list_watchlist":
-        return mem.list_watchlist(path)
-    if name == "recall_history":
-        return mem.recent_queries(int(args.get("limit", 5)), db_path=path,
-                                   query=args.get("query"))
-    if name == "set_preference":
-        return mem.set_preference(str(args["key"]), str(args["value"]), path) or {"ok": True}
-    if name == "get_preference":
-        return {"key": str(args["key"]),
-                "value": mem.get_preference(str(args["key"]),
-                                           default=args.get("default"), db_path=path)}
-    raise ValueError(f"unknown memory tool: {name}")
+        return {"raw_text": text, "isError": False}
 
 
 class Agent:
-    """Agentic loop over one live MCP session + durable SQLite memory."""
+    """Agentic loop over one live MCP session + durable SQLite memory.
+
+    Tool schemas come from the server itself (``load_mcp_tools``) plus the
+    local memory tools — nothing hand-written here, so a server-side tool
+    addition can no longer drift from what the model sees.
+    """
 
     def __init__(self, session, client: LLMClient, db_path: str | Path | None = None,
                  history_limit: int = 20):
@@ -434,14 +213,30 @@ class Agent:
             {"role": "system", "content": SYSTEM_PROMPT}
         ]
         self.history_limit = history_limit
+        self._tools: list[Any] | None = None  # loaded lazily (needs an async ctx)
+        self._schemas: list[dict[str, Any]] | None = None
+
+    async def _ensure_tools(self) -> list[Any]:
+        """Load server tools over MCP (once) and bind the memory tools."""
+        if self._tools is None:
+            from langchain_core.utils.function_calling import convert_to_openai_tool
+            from langchain_mcp_adapters.tools import load_mcp_tools
+            from tools_memory import build_memory_tools
+
+            server_tools = await load_mcp_tools(self.session) if self.session is not None else []
+            self._tools = server_tools + build_memory_tools(self.db_path)
+            self._schemas = [convert_to_openai_tool(t) for t in self._tools]
+        return self._tools
 
     async def ask(self, question: str) -> str:
         """Run one user question through the tool-calling loop."""
+        tools = await self._ensure_tools()
+        by_name = {t.name: t for t in tools}
         self.messages.append({"role": "user", "content": question})
         tools_called: list[str] = []
         final_answer = ""
         for _ in range(MAX_TOOL_STEPS + 1):
-            reply = self.client.complete(self.messages, ALL_TOOLS)
+            reply = self.client.complete(self.messages, self._schemas)
             calls = reply.get("tool_calls") or []
             self.messages.append(
                 {
@@ -455,15 +250,16 @@ class Agent:
                 break
             for call in calls:
                 name = call["name"]
-                args = dict(call.get("args") or {})
+                # Drop null values (LLM optional params)
+                args = {k: v for k, v in (call.get("args") or {}).items() if v is not None}
                 tools_called.append(name)
-                if name.startswith(MEMORY_TOOL_NAMES):
-                    outcome = await run_memory_tool(name, args, self.db_path)
-                else:
-                    # Drop null values (LLM optional params)
-                    args = {k: v for k, v in args.items() if v is not None}
-                    result = await self.session.call_tool(name, args)
-                    outcome = _extract_payload(result)
+                try:
+                    raw = await by_name[name].ainvoke(args)
+                    outcome = _extract_payload(raw) if isinstance(raw, str) else raw
+                except KeyError:
+                    outcome = {"isError": True, "error": f"unknown tool: {name}"}
+                except Exception as exc:
+                    outcome = {"isError": True, "error": str(exc)}
                 self.messages.append(
                     {
                         "role": "tool",
@@ -487,6 +283,5 @@ __all__ = [
     "Agent",
     "OpenAICompatibleClient",
     "make_client",
-    "run_memory_tool",
     "SYSTEM_PROMPT",
 ]

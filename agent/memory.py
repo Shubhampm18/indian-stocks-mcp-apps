@@ -15,11 +15,16 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
 DB_PATH = Path(__file__).with_name("memory.db")
+
+# Writes are serialised process-wide: the LangGraph tool node may run tool
+# calls in parallel threads, and SQLite connections are per-call.
+_write_lock = threading.Lock()
 
 # --- symbol normalisation (dependency-free by design) -----------------------
 #
@@ -81,8 +86,10 @@ CREATE TABLE IF NOT EXISTS preferences (
 
 
 def _connect(db_path: str | Path = DB_PATH) -> sqlite3.Connection:
-    conn = sqlite3.connect(str(db_path))
+    conn = sqlite3.connect(str(db_path), timeout=30)
     conn.row_factory = sqlite3.Row
+    # WAL lets concurrent readers proceed during a write (parallel tool calls).
+    conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(SCHEMA)
     conn.commit()
     return conn
@@ -98,7 +105,7 @@ def add_to_watchlist(symbol: str, db_path: str | Path = DB_PATH) -> list[str]:
     sym = _normaliser(symbol)
     if not sym:
         raise ValueError("symbol must not be empty")
-    with _connect(db_path) as conn:
+    with _write_lock, _connect(db_path) as conn:
         conn.execute(
             "INSERT OR IGNORE INTO watchlist(symbol, added_at) VALUES (?, ?)",
             (sym, _now()),
@@ -108,7 +115,7 @@ def add_to_watchlist(symbol: str, db_path: str | Path = DB_PATH) -> list[str]:
 
 
 def remove_from_watchlist(symbol: str, db_path: str | Path = DB_PATH) -> list[str]:
-    with _connect(db_path) as conn:
+    with _write_lock, _connect(db_path) as conn:
         conn.execute("DELETE FROM watchlist WHERE symbol = ?", (_normaliser(symbol),))
         conn.commit()
         return _watchlist(conn)
@@ -136,7 +143,7 @@ def log_query(
     answer_summary: str,
     db_path: str | Path = DB_PATH,
 ) -> int:
-    with _connect(db_path) as conn:
+    with _write_lock, _connect(db_path) as conn:
         cur = conn.execute(
             "INSERT INTO history(ts, question, tools_called, answer_summary)"
             " VALUES (?, ?, ?, ?)",
@@ -172,7 +179,7 @@ def recent_queries(limit: int = 10, db_path: str | Path = DB_PATH,
 # ---------------- preferences ----------------
 
 def set_preference(key: str, value: str, db_path: str | Path = DB_PATH) -> None:
-    with _connect(db_path) as conn:
+    with _write_lock, _connect(db_path) as conn:
         conn.execute(
             "INSERT OR REPLACE INTO preferences(key, value) VALUES (?, ?)",
             (key, str(value)),
