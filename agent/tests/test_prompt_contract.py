@@ -76,16 +76,17 @@ def test_no_tool_answer_without_figures_passes_through(tmp_path):
     assert row["guard_action"] is None
 
 
-def test_memory_only_turn_still_not_flagged(tmp_path):
-    """The D2 check must not widen to memory-only turns (C2/C3 policy):
-    memory tools ran -> skip, even when the answer echoes figures."""
+def test_memory_only_turn_does_not_flag_its_own_record(tmp_path):
+    """The no-tool flag must not fire on a recall answer whose figures come
+    from the user's stored history (that payload is its source)."""
     db = str(tmp_path / "notool3.db")
+    mem.log_query("RELIANCE price?", [], "it quoted 1570.40", db)
     scripted = [
         tool_call("recall_history", {}, "t1"),
         AIMessage(content="You asked about RELIANCE; it quoted 1,570.40 then."),
     ]
     agent = Agent(session=None, client=FakeChatModel(scripted=scripted), db_path=db)
     answer = asyncio.run(agent.ask("what did I ask last time?"))
-    assert "unverified" not in answer
+    assert "unverified" not in answer, answer
     row = mem.recent_queries(1, db)[0]
-    assert row["guard_action"] is None
+    assert row["guard_action"] == "pass"

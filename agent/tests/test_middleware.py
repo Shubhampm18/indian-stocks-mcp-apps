@@ -139,7 +139,10 @@ def test_grounded_answer_passes_untouched(tmp_path):
     assert guard.last_result["grounded"] is True
 
 
-def test_memory_only_turn_not_guarded(tmp_path):
+def test_memory_only_turn_flags_untraceable_figure(tmp_path):
+    """Policy (see middleware.py): with no price-server payload, memory
+    payloads are the reference. 999.99 is in neither, so the guard flags it
+    instead of skipping the turn."""
     db = str(tmp_path / "g4.db")
     guard = GroundingGuard(model=None, db_path=db)
     scripted = [
@@ -148,9 +151,11 @@ def test_memory_only_turn_not_guarded(tmp_path):
     ]
     graph = build(db, list(scripted), [guard])
     result = run(graph)
-    # no repair happened: the invented figure stays, guard skipped the turn
-    assert result["messages"][-1].content == scripted[-1].content
-    assert guard.last_result == {"grounded": None, "claims": []}
+    assert result["messages"][-1].content == (
+        "(unverified: 1 figures) Added. Your lucky number is 999.99."
+    )
+    assert guard.last_result["action"] == "flagged"
+    assert guard.last_result["grounded"] is False
 
 
 # ---------------- PreferenceDefaults ----------------

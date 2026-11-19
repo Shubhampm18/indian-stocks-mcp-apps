@@ -100,10 +100,13 @@ Sidebar: symbol, `as_of` date, lookback. Pages: candlestick with pattern markers
   memory payload costs one repair call — the accepted price for never
   passing recalled context off as fresh tool data.
 - **Memory is context, never authority**: the watchlist/history is shown to
-  the model as context; figures quoted to the user must come from tool
+  the model as context; figures quoted about market data must come from tool
   output in the current turn (the GroundingGuard enforces this), not from
   recalled history. A turn with no tool call at all that still quotes
-  figures is prefixed `(unverified: N figures)`.
+  figures is prefixed `(unverified: N figures)`. A turn where only memory
+  tools ran is checked against its own memory payloads: figures that appear
+  in your stored record pass (they are your history, so `grounded` stays
+  NULL), figures that appear nowhere are flagged the same way.
 - **Matching is unit-blind**: the guard compares numbers, not units. A
   "1570.40x" ratio matches a payload price of 1570.4 numerically, and
   "1.57 lakh" matches only a payload that itself writes "1.57 lakh", not one
@@ -115,9 +118,11 @@ Sidebar: symbol, `as_of` date, lookback. Pages: candlestick with pattern markers
 
 ## Cost of the LangChain move
 
-- `time uv run python -c "import app_agent"` → **~3.3 s** wall (Windows, Git
-  Bash, warm venv; measured 3× after the Phase A pass — up from 1.5 s before
-  it, driven by the async middleware hooks in langchain 1.5).
+- `time uv run python -c "import app_agent"` → **~2.1–2.6 s** wall (Windows,
+  Git Bash, warm venv, 3 runs: 2.47 / 2.55 / 2.12 s). The cost is the import
+  chain the hand-rolled loop never had — `langchain_core.messages` pulls in
+  pydantic and friends; no langgraph module is imported until the graph is
+  built, so the middleware hooks cost nothing at startup.
 - Dependency count (uv.lock entries): **73 → 96** packages (langchain,
   langchain-core, langchain-openai, langchain-mcp-adapters, langgraph×4,
   langsmith, plus their transitive deps). The `mcp==1.12.4` pin is

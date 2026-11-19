@@ -17,11 +17,12 @@ Three AgentMiddleware subclasses plugged into ``create_agent``:
                        equality, sign-insensitive: payloads store drawdowns
                        unsigned while prose adds the sign). One repair call;
                        if it still fails, the answer is prefixed
-                       "(unverified: N figures)". Turns where memory tools ran
-                       are skipped (memory is context, never authority); a
-                       turn with NO tool call that still quotes figures is
-                       flagged outright — nothing backs them and there is no
-                       tool output to repair from.
+                       "(unverified: N figures)". A turn that called no
+                       price-server tool is checked against its memory
+                       payloads instead: figures traceable to the user's own
+                       stored record pass (grounded stays NULL — memory is not
+                       market data), figures traceable to nothing are flagged
+                       outright, since there is no tool output to repair from.
 
 Mixed-turn policy (chosen: STRICT). A turn that calls server tools AND
 memory tools is checked against server payloads only — memory payloads never
@@ -248,6 +249,13 @@ class GroundingGuard(AgentMiddleware):
         return texts
 
     @staticmethod
+    def _memory_tool_texts(turn_msgs: list) -> list[str]:
+        """Local (non-price-server) payloads — the memory tools today."""
+        return [_message_text(m.content) for m in turn_msgs
+                if isinstance(m, ToolMessage)
+                and getattr(m, "name", "") not in SERVER_TOOL_NAMES]
+
+    @staticmethod
     def _tool_numbers(texts: list[str]) -> list[float]:
         out: list[float] = []
         for text in texts:
@@ -270,21 +278,25 @@ class GroundingGuard(AgentMiddleware):
         turn_msgs = self._this_turn_messages(messages)
         texts = self._server_tool_texts(turn_msgs)
         if not texts:
-            if any(isinstance(m, ToolMessage) for m in turn_msgs):
-                self.last_result = {"grounded": None, "claims": []}
-                return None  # memory-only turn: memory is context, never authority
+            # No price-server payload this turn. A recall answer's source IS the
+            # user's own stored record, so memory payloads may validate its
+            # figures — but a figure that appears in neither memory nor the
+            # server was invented, and nothing exists to repair it from.
+            memory_texts = self._memory_tool_texts(turn_msgs)
             draft = _message_text(last.content)
             claims = extract_claims(draft)
-            if not claims:
-                self.last_result = {"grounded": None, "claims": []}
-                return None  # pure conversation, nothing quoted to verify
-            # No tool ran this turn, yet figures were quoted: nothing backs
-            # them, and without tool output there is nothing to repair FROM.
+            numbers = self._tool_numbers(memory_texts) if memory_texts else []
+            unmatched = [c for c in claims if not _matches(c["value"], numbers)]
+            if not unmatched:
+                # grounded stays None: these are memory figures, not price data.
+                self.last_result = {"grounded": None, "claims": claims,
+                                    "action": "pass" if claims else None}
+                return None
             self.last_result = {"grounded": False, "claims": claims,
-                                "unmatched": claims, "action": "flagged"}
-            return {"last_id": last.id, "numbers": [], "repair_input": None,
+                                "unmatched": unmatched, "action": "flagged"}
+            return {"last_id": last.id, "numbers": numbers, "repair_input": None,
                     "replacement":
-                        f"(unverified: {len(claims)} figures) "
+                        f"(unverified: {len(unmatched)} figures) "
                         f"{draft}".strip()}
         draft = _message_text(last.content)
         claims = extract_claims(draft)

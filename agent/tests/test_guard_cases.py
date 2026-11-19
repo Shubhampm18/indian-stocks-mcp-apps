@@ -213,16 +213,38 @@ def test_grounded_turn_stores_pass(tmp_path):
     assert row["guard_action"] == "pass"
 
 
-def test_memory_only_turn_stores_null(tmp_path):
+def test_memory_only_turn_traceable_figure_passes(tmp_path):
+    """A recall answer's figures come from the user's own stored record, so
+    memory payloads validate them — but ``grounded`` stays NULL: traceable to
+    memory is not the same as verified against market data."""
     db = str(tmp_path / "tel3.db")
+    mem.log_query("what did RELIANCE close at?", [], "closed at 1570.40", db)
+    scripted = [
+        tool_call("recall_history", {"limit": 1}, "t1"),
+        AIMessage(content="Last time I quoted Rs 1,570.40 for RELIANCE."),
+    ]
+    agent = _agent_with(scripted, db, {"current_price": 1570.4})
+    answer = asyncio.run(agent.ask("what did I ask last time?"))
+    assert "unverified" not in answer, answer
+    row = mem.recent_queries(1, db)[0]
+    assert row["guard_action"] == "pass"
+    assert row["grounded"] is None
+
+
+def test_memory_only_turn_flags_untraceable_figure(tmp_path):
+    """No price-server payload AND no memory payload holds the figure: it was
+    invented, so it is flagged rather than silently passing."""
+    db = str(tmp_path / "tel4.db")
     scripted = [
         tool_call("list_watchlist", {}, "t1"),
         AIMessage(content="Your watchlist is empty; nothing to guard 999.99."),
     ]
     agent = _agent_with(scripted, db, {"current_price": 1570.4})
-    asyncio.run(agent.ask("what's on my watchlist?"))
+    answer = asyncio.run(agent.ask("what's on my watchlist?"))
+    assert answer.startswith("(unverified: 1 figures)"), answer
     row = mem.recent_queries(1, db)[0]
-    assert row["guard_action"] is None
+    assert row["guard_action"] == "flagged"
+    assert row["grounded"] == 0
 
 
 def test_flagged_turn_stores_flagged(tmp_path):
