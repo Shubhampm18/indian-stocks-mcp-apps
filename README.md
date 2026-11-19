@@ -122,11 +122,14 @@ Sidebar: symbol, `as_of` date, lookback. Pages: candlestick with pattern markers
 
 ## Cost of the LangChain move
 
-- `time uv run python -c "import app_agent"` → **~2.1–2.6 s** wall (Windows,
-  Git Bash, warm venv, 3 runs: 2.47 / 2.55 / 2.12 s). The cost is the import
-  chain the hand-rolled loop never had — `langchain_core.messages` pulls in
-  pydantic and friends; no langgraph module is imported until the graph is
-  built, so the middleware hooks cost nothing at startup.
+- `time uv run python -c "import app_agent"` → **~5.4–5.8 s** wall (Windows,
+  Git Bash, warm venv, 3 runs: 5.81 / 5.68 / 5.44 s). The cost is the import
+  chain the hand-rolled loop never had: `app_agent` now imports `middleware`
+  at module level (Phase F2, to un-couple `_data_through` from a lazy import),
+  which pulls `langchain.agents.middleware` — and that in turn pydantic,
+  langgraph and friends. Earlier measurements with a lazy middleware import
+  were ~2.1–2.6 s; the module-level import trades ~3 s of cold start for a
+  flatter dependency graph.
 - Dependency count (uv.lock entries): **73 → 96** packages (langchain,
   langchain-core, langchain-openai, langchain-mcp-adapters, langgraph×4,
   langsmith, plus their transitive deps). The `mcp==1.12.4` pin is
