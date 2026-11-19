@@ -32,3 +32,20 @@ def test_server_registers_exactly_the_seven_expected_tools():
     assert names == EXPECTED_TOOL_NAMES, (
         f"server tool drift: registered={names}, agent expects={EXPECTED_TOOL_NAMES}"
     )
+
+
+def test_every_tool_name_list_agrees_with_the_server():
+    """Three lists pin the server's tools: this test, the demo client, and the
+    grounding guard's SERVER_TOOL_NAMES. If one falls behind, new tools escape
+    the guard silently (their payloads are never scanned), so drift must fail
+    here rather than in production."""
+    import client
+    import middleware
+
+    assert set(client.EXPECTED_TOOLS) == set(EXPECTED_TOOL_NAMES), (
+        "client.EXPECTED_TOOLS drifted from the server"
+    )
+    assert set(middleware.SERVER_TOOL_NAMES) == set(EXPECTED_TOOL_NAMES), (
+        "middleware.SERVER_TOOL_NAMES drifted from the server: those tools' "
+        "payloads would not be checked by the grounding guard"
+    )
