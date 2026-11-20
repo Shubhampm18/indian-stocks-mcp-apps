@@ -142,20 +142,20 @@ def vintage_delta(v_then: pd.Series, v_now: pd.Series) -> pd.DataFrame:
 def rank_peers(results: list[dict], metric: str) -> list[dict]:
     """Re-rank raw peer results by the chosen metric, best first.
 
-    Rows without a numeric value sink to the bottom (sorted last, flag
-    value=None). Pure: the server's 'ranked' field is trusted, but this
-    makes the ordering explicit and testable.
+    Mirrors the server's ranking semantics: descending numeric value, None
+    last. Rows keep all their fields; a 1-based 'rank' is added. Pure: this
+    makes the ordering explicit and testable instead of trusting the wire.
     """
+    rows = [dict(r) for r in results if isinstance(r, dict)]
+
     def key(row: dict):
         val = row.get("value")
         return (val is None, -(val if isinstance(val, (int, float)) else 0))
 
-    ranked = sorted(
-        (r for r in results if isinstance(r, dict)),
-        key=key,
-    )
-    return [{"symbol": r.get("symbol"), "metric": metric, "value": r.get("value")}
-            for r in ranked]
+    ranked = sorted(rows, key=key)
+    for i, row in enumerate(ranked, start=1):
+        row["rank"] = i
+    return ranked
 
 
 # ---------------------------------------------------------------------------
