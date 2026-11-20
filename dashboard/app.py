@@ -5,7 +5,8 @@ Vintage) and renders the title. Shared sidebar + guarded data fetch live
 in common.py; each page file owns one section.
 
 GUARANTEE: no row with date > as_of appears anywhere — get_data() in
-common.py enforces it before any page renders content.
+common.py enforces it before any page renders content; the Vintage page
+enforces it per vintage (each frame against its own as_of).
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ page = st.navigation(
         st.Page("pages/overview.py", title="Overview", icon="📈", default=True),
         st.Page("pages/patterns.py", title="Patterns", icon="🔍"),
         st.Page("pages/peers.py", title="Peers", icon="⚖️"),
+        st.Page("pages/vintage.py", title="Vintage", icon="🕰️"),
     ]
 )
 
