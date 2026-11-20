@@ -2,8 +2,9 @@
 
 A 7-tool turn can exceed any excerpt; slicing the payload text used to cut
 off exactly the figures the repair needed, producing a false "(unverified)"
-flag. The repair input now leads with the COMPLETE number list collected from
-the payloads, so only a bounded excerpt follows.
+flag. The repair input now leads with the numbers collected from the
+payloads — capped, keeping the ones nearest the claims being repaired — so
+the input stays bounded even when a payload holds thousands of numbers.
 """
 
 from __future__ import annotations
@@ -91,5 +92,32 @@ def test_repair_prompt_carries_complete_number_list_and_stays_bounded():
         {"messages": _turn(payload_text, "price is 1,999.99")}, runtime=None)
     assert guard.last_result["action"] == "repaired"
     assert captured, "repair model was never called"
-    assert "1570.4" in captured[0]      # complete number list carries the figure
+    assert "1,570.4" in captured[0]    # number list carries the figure
     assert len(captured[0]) < 4000      # yet the repair input stays bounded
+
+
+def test_repair_prompt_stays_bounded_for_thousands_of_numbers():
+    """A 400-row OHLCV payload yields thousands of numbers; the cap must keep
+    the prompt small while still offering the figures near the claim."""
+    rows = [{"date": f"2025-{(i % 12) + 1:02d}-{(i % 28) + 1:02d}",
+             "open": 1500.0 + i / 7, "high": 1510.5 + i / 7,
+             "low": 1490.25 + i / 7, "close": 1570.4 if i == 399 else 1505.75 + i / 7,
+             "volume": 12_345_678 + i}
+            for i in range(400)]
+    payload_text = json.dumps({"rows": rows, "data_through": "2025-12-31"})
+    captured: list[str] = []
+
+    class Capture(FakeChatModel):
+        def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+            captured.append(messages[0].content)
+            return super()._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
+
+    guard = GroundingGuard(model=Capture(scripted=[
+        AIMessage(content="closed at Rs 1,570.40")]))
+    guard.after_model(
+        {"messages": _turn(payload_text, "closed at 1,999.99")}, runtime=None)
+    assert guard.last_result["action"] == "repaired"
+    prompt = captured[0]
+    assert "1,570.4" in prompt, "the near-miss candidate must survive the cap"
+    assert len(prompt) < 6000, f"repair prompt grew to {len(prompt)} chars"
+    assert "e+" not in prompt, "numbers must not be scientific notation"

@@ -150,6 +150,35 @@ async def _await(awaitable):
     return await awaitable
 
 
+REPAIR_NUMBER_CAP = 200
+
+
+def _fmt_number(value: float) -> str:
+    """Comma-grouped, never scientific notation (volumes reach 1e7)."""
+    if float(value).is_integer():
+        return f"{value:,.0f}"
+    return f"{value:,.6f}".rstrip("0").rstrip(".")
+
+
+def _repair_number_list(numbers: list[float], unmatched: list[dict[str, Any]],
+                        cap: int = REPAIR_NUMBER_CAP) -> str:
+    """Candidates for the repair prompt, compact and complete-enough.
+
+    Every distinct payload number while they fit under ``cap``; beyond that,
+    keep the ones nearest the claims being repaired (the true value is almost
+    always a near-miss of what the model wrote), then show them sorted.
+    """
+    unique = sorted({round(n, 4) for n in numbers})
+    if len(unique) > cap:
+        targets = [abs(c["value"]) for c in unmatched] or [0.0]
+
+        def distance(n: float) -> float:
+            return min(abs(abs(n) - t) / max(t, 1e-9) for t in targets)
+
+        unique = sorted(sorted(unique, key=distance)[:cap])
+    return ", ".join(_fmt_number(n) for n in unique)
+
+
 def _with_default_note(result, arg_name: str, default: str):
     """Append a visible note so the model can say which default it used."""
     note = f"default applied: {arg_name}={default}"
@@ -314,9 +343,10 @@ class GroundingGuard(AgentMiddleware):
         )
         # A 7-tool turn can exceed any excerpt, and slicing the payload text
         # can cut off exactly the figures the repair needs -> a false
-        # "(unverified)" flag. Lead with the COMPLETE number list collected
-        # from the payloads (compact, bounded), then a short excerpt.
-        number_list = ", ".join(f"{n:g}" for n in sorted({round(n, 4) for n in numbers}))
+        # "(unverified)" flag. Lead with the numbers collected from the
+        # payloads, kept compact: a 400-row payload has thousands of them, so
+        # beyond the cap we keep the ones closest to the claims being repaired.
+        number_list = _repair_number_list(numbers, unmatched)
         repair_input = (
             f"{repair_prompt}\n\nNumbers present in the tool output:\n"
             f"{number_list}\n\nTool output (excerpt):\n"
