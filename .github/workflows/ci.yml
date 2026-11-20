@@ -25,11 +25,24 @@ jobs:
           python-version: "3.12"
       - run: uv sync --all-packages
       - name: dashboard boots and answers health
+        shell: bash
         run: |
+          set -euo pipefail
           cd dashboard
-          uv run streamlit run app.py --server.headless true --server.port 8894 &
+          uv run streamlit run app.py --server.headless true --server.port 8894 \
+            >/tmp/streamlit.log 2>&1 &
+          pid=$!
+          # Kill the server before the step ends: the setup-uv post step archives
+          # the uv cache, and a live `uv run` keeps writing to it, which fails
+          # that tar ("file changed as we read it") and reddens the job.
+          trap 'kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true' EXIT
           for i in $(seq 1 30); do
             sleep 2
-            if curl -fsS localhost:8894/_stcore/health; then exit 0; fi
+            if curl -fsS localhost:8894/_stcore/health >/dev/null; then
+              echo "dashboard healthy after ~$((i*2))s"
+              exit 0
+            fi
           done
-          echo "dashboard did not become healthy" && exit 1
+          echo "dashboard did not become healthy"
+          cat /tmp/streamlit.log
+          exit 1
