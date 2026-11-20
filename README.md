@@ -4,7 +4,7 @@
 
 ```
 agent/        LangChain agent (create_agent) + durable SQLite memory + stdio client
-dashboard/    5-page Streamlit UI (Price / Patterns / Indicators / Returns / Peers)
+dashboard/    4-page Streamlit UI (Overview / Patterns / Peers / Vintage)
 ```
 
 ## Why this repo exists
@@ -86,9 +86,32 @@ demo peer comparison / indicators / future-date error path).
 
 ## Dashboard
 
-Sidebar: symbol, `as_of` date, lookback. Pages: candlestick with pattern markers and support/resistance, pattern table, indicators with an honest trend badge, returns, peer ranking. Future `as_of` → error and stop; a row dated after `as_of` → explicit error, not a silent chart.
+Four pages over one cached fetch per (symbol, as_of):
+
+- **Overview** — candlestick (or line) with pattern markers and
+  support/resistance, indicator overlays (RSI / MACD get their own
+  subplot row), the honest trend badge, a 1/5/20/60-day return strip, and
+  the full indicator table in an expander.
+- **Patterns** — a workbench with a SCAN DEPTH slider (5–250 bars): the
+  detector scans only the last `window` bars, and the empty state names
+  that window, so "did it miss my doji" is answerable on screen.
+- **Peers** — ranked cross-symbol comparison with a metric selector
+  (default `return_20d`) and an editable peer list.
+- **Vintage** — the same symbol rebuilt at two dates, overlayed and
+  diffed: later dividends re-base the whole adjusted series, so the same
+  historical day reads differently depending on when you ask.
+
+Every view state is a linkable claim —
+`?symbol=TCS.NS&as_of=2024-11-05&lookback=250` reproduces a screen
+exactly. Future `as_of` → error and stop; a row dated after `as_of` →
+explicit error, not a silent chart.
 
 ## Honest limits
+
+- **Dashboard**: single source (yfinance via the server's data layer);
+  peers are a hand-entered comparison set, not an index constituent
+  list; the pattern detector's scan-window caveat is visible in the UI
+  (the SCAN DEPTH slider and its caption).
 
 - **Price data only** — no fundamentals, filings, or corporate actions.
 - **Single source**: yfinance, via the server. If yfinance is wrong or

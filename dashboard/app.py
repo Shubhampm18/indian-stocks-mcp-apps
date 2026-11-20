@@ -1,11 +1,12 @@
 """Streamlit multi-page dashboard for indian-stocks-mcp's data layer.
 
-Entry point: defines the navigation (Price / Patterns / Indicators /
-Returns / Peers) and renders the title. Shared sidebar + guarded data
-fetch live in common.py; each page file owns one section.
+Entry point: defines the navigation (Overview / Patterns / Peers /
+Vintage) and renders the title. Shared sidebar + guarded data fetch live
+in common.py; each page file owns one section.
 
 GUARANTEE: no row with date > as_of appears anywhere — get_data() in
-common.py enforces it before any page renders content.
+common.py enforces it before any page renders content; the Vintage page
+enforces it per vintage (each frame against its own as_of).
 """
 
 from __future__ import annotations
@@ -17,11 +18,10 @@ st.title("📈 Stock Analyst Dashboard — NSE / BSE (as_of point-in-time)")
 
 page = st.navigation(
     [
-        st.Page("pages/price.py", title="Price", icon="📈", default=True),
+        st.Page("pages/overview.py", title="Overview", icon="📈", default=True),
         st.Page("pages/patterns.py", title="Patterns", icon="🔍"),
-        st.Page("pages/indicators.py", title="Indicators", icon="📊"),
-        st.Page("pages/returns.py", title="Returns", icon="💰"),
         st.Page("pages/peers.py", title="Peers", icon="⚖️"),
+        st.Page("pages/vintage.py", title="Vintage", icon="🕰️"),
     ]
 )
 
