@@ -14,12 +14,32 @@ Requires LLM_API_KEY / OPENAI_API_KEY in the environment.
 
 from __future__ import annotations
 
+import sys
+
 import memory as mem
 from agent import Agent, make_client
 from client import server_params
 from langgraph.errors import GraphRecursionError
 from mcp import ClientSession
 from mcp.client.stdio import stdio_client
+
+
+def _utf8_stdio() -> None:
+    """Make printing survives any model output on Windows.
+
+    PowerShell's legacy console uses cp1252, so a model that writes a Unicode
+    hyphen (\u2011), rupee sign (\u20b9) or en dash would raise
+    UnicodeEncodeError from print() and tear the REPL down mid-turn. Reconfigure
+    with errors="replace" so the worst case is a substituted character.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):  # redirected/piped stream: leave it alone
+            pass
 
 
 def _handle_error(exc: Exception) -> str:
@@ -30,6 +50,7 @@ def _handle_error(exc: Exception) -> str:
 
 
 async def main() -> int:
+    _utf8_stdio()
     try:
         client = make_client()
     except RuntimeError as exc:

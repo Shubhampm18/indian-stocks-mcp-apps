@@ -138,10 +138,20 @@ explicit error, not a silent chart.
 - **Chart patterns**: the detector scans only the last `window` bars
   (default 20) — the prompt tells the model to widen `window` before
   declaring a pattern absent for older dates.
-- **Live proof blocked**: no `LLM_API_KEY`/`OPENAI_API_KEY` was configured in
-  this environment, so the NVIDIA endpoint's acceptance of ChatOpenAI's
-  standard message shape (since `_normalise_messages` was removed) is
-  unverified — run the two live transcripts in Phase L before trusting it.
+- **Live proof (2026-11-20, NVIDIA endpoint)**: the two transcripts ran.
+  "any doji on RELIANCE as of 2025-12-31?" → `get_chart_patterns` → last doji
+  2025-12-04 (confidence 0.7), `data_through 2025-12-31` stated, no invented
+  figures; the stored row reads `as_of_used=2025-12-31`,
+  `data_through=2025-12-31`, `grounded=1`, `guard_action=pass`. After a
+  restart, "what did I ask last time?" returned that question from SQLite via
+  `recall_history`. This also confirms the endpoint accepts `ChatOpenAI`'s
+  standard message shape now that `_normalise_messages` is gone.
+- **The model must support tool calling, and not every catalog entry does**:
+  on this endpoint `z-ai/glm-5.3-flash` hangs past 60 s on a plain completion
+  (streaming too), while `nvidia/nemotron-3.5-lightning-30b-a3b` answers in
+  under a second and emits correct tool calls. If the agent times out on the
+  first turn, test the model with a bare `/chat/completions` call before
+  blaming the agent; `LLM_MODEL` is the only knob.
 
 ## Cost of the LangChain move
 
