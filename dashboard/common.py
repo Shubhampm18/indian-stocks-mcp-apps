@@ -172,7 +172,11 @@ def seed_state_from_query() -> None:
     params = {k: str(st.query_params.get(k, "")) for k in
               ("symbol", "as_of", "lookback")}
     sig = "|".join(f"{k}={params[k]}" for k in params)
-    if sig == st.session_state.get("_qp_sig"):
+    keys = ("symbol_raw", "as_of", "lookback")
+    # Re-seed when the URL changed OR the widget-backed state is missing
+    # (widget state can be cleared on page switches / fresh sessions).
+    if sig == st.session_state.get("_qp_sig") and \
+            all(k in st.session_state for k in keys):
         return
     parsed = parse_view_params(params)
     st.session_state["symbol_raw"] = parsed["symbol"]
