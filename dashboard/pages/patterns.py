@@ -91,7 +91,7 @@ for level in support_resistance.get("resistance", []):
     fig.add_hline(y=level, line_dash="dot", line_color="red")
 fig.update_layout(title=f"{symbol} patterns (last {window} bars)",
                   xaxis_title="date", yaxis_title="INR")
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, width="stretch")
 data_through = df_full.index.max().date()
 rows_used = df.attrs.get("rows_used", "n/a")
 st.caption(f"data_through {data_through} (≤ as_of {as_of}) · "

@@ -50,7 +50,7 @@ else:
     ranked = common.rank_peers(peer["results"], peer_metric)
     st.plotly_chart(px.bar(ranked, x="symbol", y="value",
                            title=f"{peer_metric} (ranked)"),
-                    use_container_width=True)
+                    width="stretch")
     st.dataframe(pd.DataFrame(ranked), hide_index=True)
 for e in peer.get("errors", []):
     st.error(f"{e.get('symbol')}: {e.get('error')}")

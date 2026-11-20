@@ -157,7 +157,7 @@ for level in support_resistance.get("resistance", []):
 
 fig.update_layout(title=f"{symbol} OHLC (adjusted close)",
                   xaxis_title="date", yaxis_title="INR", height=600)
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, width="stretch")
 st.caption("Blue diamonds mark candlestick patterns from the last 20 bars; "
            "green dotted = support, red dotted = resistance.")
 

@@ -86,7 +86,7 @@ fig.update_layout(
     title=f"{symbol} CloseAdj — same dates, two rebuild dates",
     xaxis_title="date", yaxis_title="INR",
 )
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, width="stretch")
 
 recent = joined.tail(10).copy()
 recent.insert(0, "date", [str(i.date()) for i in recent.index])
